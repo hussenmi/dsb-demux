@@ -1,7 +1,7 @@
 import numpy as np
 from pandas.api.types import is_integer_dtype
 from scipy.sparse import issparse
-from .logging import get_logger
+from ._logging import get_logger
 
 def get_whitelist_background(
     ad_raw,
@@ -48,4 +48,4 @@ def get_whitelist_background(
     )
     logger.info(msg)
 
-    return ids_background
+    return list(ids_background)

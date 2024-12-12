@@ -63,12 +63,12 @@ def test_dsb_denoising(test_datasets):
         adata_raw,
         pseudocount=1,
         add_key_normalise = "normalised",
-        add_key_dnd = "denoised",
+        add_key_denoise="denoised",
         denoise_counts=True,
         inplace=False,
     )
 
-    # Verify that the dsb_normalized layer is added and has expected dimensions
+    # Verify that the normalised and denoised layer is added and has expected dimensions
     assert "normalised" in adata_result_denoised.layers
     assert "denoised" in adata_result_denoised.layers
     assert adata_result_denoised.layers["normalised"].shape == adata_filtered_original.X.shape
@@ -100,11 +100,11 @@ def test_dsb_sparse_input(test_datasets):
         adata_raw,
         pseudocount=1,
         add_key_normalise = "normalised",
-        add_key_dnd = "denoised",
+        add_key_denoise="denoised",
         denoise_counts=False
     )
 
-    # Verify that the dsb_normalized layer is added and is a dense array
+    # Verify that the denoised layer is added and is a dense array
     assert "normalised" in adata_result.layers
     assert "denoised" in adata_result.layers
     assert isinstance(adata_result.layers["normalised"], np.ndarray)

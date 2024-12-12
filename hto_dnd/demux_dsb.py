@@ -3,6 +3,7 @@
 
 import pandas as pd
 import numpy as np
+from pprint import pformat
 from sklearn.mixture import GaussianMixture
 from sklearn.cluster import KMeans
 from sklearn.metrics import silhouette_score, davies_bouldin_score
@@ -10,6 +11,10 @@ import yaml
 from skimage.filters import threshold_otsu
 import scipy.stats
 import anndata as ad
+
+from ._logging import get_logger
+from ._meta import init_meta, add_meta
+from line_profiler import profile
 
 def numpy_to_python(obj):
     """Convert NumPy types to native Python types.
@@ -28,7 +33,7 @@ def numpy_to_python(obj):
         return [numpy_to_python(i) for i in obj]
     else:
         return obj
-    
+
 def write_stats(result_df, metrics, output_file="stats.yml"):
     """Write statistics and metrics to a YAML file.
 
@@ -92,33 +97,33 @@ def cluster_and_evaluate(data, method="kmeans"):
     elif method == "otsu":
         # Ensure data is 1D
         data = data.flatten()
-        
+
         # Calculate Otsu's threshold
         threshold = threshold_otsu(data)
-        
+
         # Create binary labels
         labels = (data > threshold).astype(int)
-        
+
         # Calculate some metrics
         background = data[labels == 0]
         signal = data[labels == 1]
-        
+
         # Inter-class variance (which Otsu's method maximizes)
         weight1 = np.sum(labels == 0) / len(labels)
         weight2 = np.sum(labels == 1) / len(labels)
         inter_class_variance = weight1 * weight2 * (np.mean(signal) - np.mean(background))**2
-        
+
         # Calculate entropy of the thresholded image
         hist, _ = np.histogram(labels, bins=2)
         hist_norm = hist / np.sum(hist)
         entropy = scipy.stats.entropy(hist_norm)
-        
+
         metrics = {
             "threshold": threshold,
             "inter_class_variance": inter_class_variance,
             "entropy": entropy
         }
-        
+
         return labels, threshold, metrics
 
     else:
@@ -126,38 +131,57 @@ def cluster_and_evaluate(data, method="kmeans"):
 
     return labels, positive_cluster, metrics
 
+@profile
 def demux(
-    dsb_denoised_adata: ad.AnnData,
+    adata_denoised: ad.AnnData,
     method: str = "kmeans",
-    layer: str = "dsb_normalized",
+    layer: str = None,
     save_stats: bool = False,
+    inplace: bool = False,
+    verbose: int = 1,
 ):
     """
     Classify HTOs as singlets (assign to HTO), doublets, or negatives.
-     
+
     It uses a 2-component K-means, GMM, or Otsu threshold method to categorize cells based on their HTO classifications.
 
     Args:
-        dsb_denoised_adata (ad.AnnData): The DSB denoised AnnData object.
+        adata_denoised (ad.AnnData): The DSB denoised AnnData object.
         method (str): Clustering method to use. Must be either 'gmm' or 'kmeans'. Default is 'kmeans'.
-        layer (str): The layer to use for demultiplexing. Default is 'dsb_normalized'.
+        layer (str): The layer to use for demultiplexing. Default is 'None'.
         save_stats (bool): Whether to save the statistics to a YAML file. Default is False.
+        inplace (bool): Whether to modify the input AnnData object. Default is False.
+        verbose (int): Verbosity level. Default is 1.
 
     Returns:
         AnnData: An AnnData object containing the results of the demultiplexing.
     """
-    # check that the values are not integers (as they should be floats)
-    assert dsb_denoised_adata.layers[layer].dtype == float, "Denoised AnnData object must have float values."
 
-    # Check if the dsb_normalized is added in dsb_denoised_adata layers and get the df
-    df_umi_dsb = dsb_denoised_adata.to_df(layer=layer)
+    # debug - print parameters
+    logger = get_logger("demux", level=verbose)
+    params = {k: v.shape if isinstance(v, ad.AnnData) else v for k, v in locals().items()}
+    params_str = pformat(params, indent=4)
+    logger.debug(f"Parameters:\n{params_str}")
+    logger.info(f"Starting demultiplexing using '{method}'...")
+
+    # assertions
+    if inplace:
+        raise NotImplementedError("Inplace operation is not supported.")
+
+    # get data
+    adata = adata_denoised.copy()
+    df_umi = adata.to_df(layer=layer)
+    assert all([t == float for t in df_umi.dtypes]), "Denoised data must be float."
+
+    # initialize meta
+    adata = init_meta(adata)
 
     classifications = []
     metrics = {}
     thresholds = {}
 
-    for hto in df_umi_dsb.columns:
-        data = df_umi_dsb[hto].values.reshape(-1, 1)
+    for hto in df_umi.columns:
+        data = df_umi[hto].values.reshape(-1, 1)
 
         # Perform clustering and evaluation in one step
         if method == "otsu":
@@ -177,7 +201,7 @@ def demux(
             )
 
     result_df = pd.DataFrame(
-        classifications, index=df_umi_dsb.columns, columns=df_umi_dsb.index
+        classifications, index=df_umi.columns, columns=df_umi.index
     ).T
 
     # Categorize cells based on their HTO classifications
@@ -188,20 +212,32 @@ def demux(
         elif len(positive_htos) == 1:
             return positive_htos[0], None
         else:
-            return "Doublet", ", ".join(positive_htos)
+            return "Doublet", ",".join(positive_htos)
 
-    result_df["hashID"], result_df["Doublet_Info"] = zip(
+    result_df["hash_id"], result_df["doublet_info"] = zip(
         *result_df.apply(categorize_cell, axis=1)
     )
 
 
     # create an anndata object where the denoised data is the X matrix, the barcodes and features are the obs and var names, add the hashID and Doublet_Info as an obs column, and metrics as an uns
-    dsb_denoised_adata.obs["hashID"] = result_df["hashID"]
-    dsb_denoised_adata.obs["Doublet_Info"] = result_df["Doublet_Info"]
-    dsb_denoised_adata.uns["metrics"] = metrics
-    dsb_denoised_adata.uns["thresholds"] = thresholds if method == "otsu" else None
+    adata.obs["hash_id"] = result_df["hash_id"]
+    adata.obs["doublet_info"] = result_df["doublet_info"]
+
+    # add metadata
+    adata = add_meta(
+        adata,
+        step="demux",
+        params=dict(
+            method=method,
+            layer=layer,
+        ),
+        metrics=metrics,
+        thresholds=thresholds if method == "otsu" else None,
+    )
+
+    logger.info(f"Demultiplexing completed. Assignments found as 'hash_id' and 'doublet_info' in adata.obs.")
 
     if save_stats:
         write_stats(result_df, metrics)
 
-    return dsb_denoised_adata
+    return adata

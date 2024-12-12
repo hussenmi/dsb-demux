@@ -116,7 +116,7 @@ def test_dsb_cli(test_datasets_with_files, tmp_path):
 
 
     adata_dsb = ad.read_h5ad(dsb_output_path)
-    assert "dsb_normalized" in adata_dsb.layers, "DSB normalized layer not found"
+    assert "denoised" in adata_dsb.layers, "Denoised and normalised layer not found"
 
 def test_demux_cli(test_datasets_with_files, tmp_path):
     filtered_path, raw_path, adata_filtered, adata_raw = test_datasets_with_files

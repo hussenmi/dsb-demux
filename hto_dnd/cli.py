@@ -5,7 +5,7 @@ Can be used in this way:
 python cli.py dsb --adata-filtered-in path/to/filtered_data.h5ad --adata-raw-in path/to/raw_data.h5ad --adata-out path/to/output_data.h5ad --create-viz
 
 # Perform demultiplexing
-python cli.py demux --dsb-denoised-adata-dir path/to/dsb_normalized_data.h5ad --method kmeans --output-path path/to/demultiplexed_data.h5ad
+python cli.py demux --dsb-denoised-adata-dir path/to/normalised_data.h5ad --method kmeans --output-path path/to/demultiplexed_data.h5ad
 
 # Perform DSB normalization and demultiplexing
 python cli.py dsb_and_demux --adata_filtered_dir path/to/filtered_data.h5ad --adata_raw_dir path/to/raw_data.h5ad --output-path path/to/output_data.h5ad
@@ -28,7 +28,7 @@ def parse_dsb_arguments():
     Returns:
         argparse.Namespace: An object containing all the parsed arguments with the following attributes:
             path_adata_filtered_in (str): Path to filtered input AnnData file (.h5ad)
-            path_adata_raw_in (str): Path to raw input AnnData file (.h5ad) 
+            path_adata_raw_in (str): Path to raw input AnnData file (.h5ad)
             path_adata_out (str): Path to output AnnData file (.h5ad)
             create_viz (bool): Whether to create visualization plots (default: False)
             pseudocount (float): Pseudocount value used in the formula to avoid taking log of 0 (default: 10)
@@ -85,6 +85,22 @@ def parse_dsb_arguments():
         default=True,
     )
 
+    parser.add_argument(
+        "--add-key-normalise",
+        action="store",
+        dest="add_key_normalise",
+        help="key to store the normalized data in the AnnData object",
+        default="normalised",
+    )
+
+    parser.add_argument(
+        "--add-key-denoise",
+        action="store",
+        dest="add_key_denoise",
+        help="key to store the normalised and denoised data in the AnnData object",
+        default="denoised",
+    )
+
     # parse arguments
     params = parser.parse_args()
     return params
@@ -97,10 +113,10 @@ def parse_demux_arguments():
         argparse.Namespace: A namespace object containing the following attributes:
             path_dsb_denoised_adata_dir (str): Path to directory containing DSB denoised AnnData files
             method (str): Clustering method to use for demultiplexing (default: 'kmeans')
-            layer (str): Data layer to use for demultiplexing (default: 'dsb_normalized')
+            layer (str): Data layer to use for demultiplexing (default: 'dnd')
             output_path (str): Path where the output AnnData file will be saved
     """
-    
+
     parser = argparse.ArgumentParser()
 
     parser.add_argument(
@@ -123,7 +139,7 @@ def parse_demux_arguments():
         action="store",
         dest="layer",
         help="layer to use for demultiplexing",
-        default="dsb_normalized",
+        default="denoised",
     )
 
     parser.add_argument(
@@ -146,7 +162,7 @@ def parse_dsb_and_demux_arguments():
     Returns:
         argparse.Namespace: Parsed command line arguments containing:
             path_adata_filtered_dir (str): Path to filtered input AnnData directory
-            path_adata_raw_dir (str): Path to raw input AnnData directory 
+            path_adata_raw_dir (str): Path to raw input AnnData directory
             output_path (str): Path where the output AnnData file will be saved
     """
 
@@ -183,7 +199,7 @@ def parse_dsb_and_demux_arguments():
 
 def main():
     """CLI interface for HTO demultiplexing operations.
-    
+
     This function serves as the main entry point for the command-line interface,
     providing three main functionalities: DSB normalization, demultiplexing, and
     a combined DSB-demultiplexing operation.
@@ -204,7 +220,7 @@ def main():
         For 'demux' command:
             --dsb-denoised-adata-dir: Directory with DSB-normalized AnnData
             --method: Demultiplexing method (default: "kmeans")
-            --layer: Layer name in AnnData (default: "dsb_normalized")
+            --layer: Layer name in AnnData (default: "dnd")
             --output-path: Path for output file
         For 'dsb_and_demux' command:
             --adata_filtered_dir: Directory with filtered AnnData
@@ -215,7 +231,7 @@ def main():
         $ python script.py demux --dsb-denoised-adata-dir processed.h5ad --output-path result.h5ad
         $ python script.py dsb_and_demux --adata_filtered_dir filtered.h5ad --adata_raw_dir raw.h5ad --output-path final.h5ad
     """
-    
+
     parser = argparse.ArgumentParser(description="HTO DND CLI")
     subparsers = parser.add_subparsers(dest="command")
 
@@ -230,7 +246,7 @@ def main():
     demux_parser = subparsers.add_parser("demux")
     demux_parser.add_argument("--dsb-denoised-adata-dir", required=True)
     demux_parser.add_argument("--method", default="kmeans")
-    demux_parser.add_argument("--layer", default="dsb_normalized")
+    demux_parser.add_argument("--layer", default="dnd")
     demux_parser.add_argument("--output-path", required=True)
 
     dsb_and_demux_parser = subparsers.add_parser("dsb_and_demux")
@@ -253,7 +269,7 @@ def main():
         )
     elif args.command == "demux":
         adata_result = demux(
-            dsb_denoised_adata=ad.read(args.dsb_denoised_adata_dir),
+            adata_denoised=ad.read(args.dsb_denoised_adata_dir),
             method=args.method,
             layer=args.layer,
         )
